@@ -40,18 +40,21 @@ const Dashboard = () => {
       const twelveAgo = new Date(now);
       twelveAgo.setFullYear(now.getFullYear() - 1);
 
-      let allRows = [];
+      // Fetch from Google Sheet API endpoint
+      const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbw5EF2qxIKlPIufd8Mhgv6AkYvy10tXkQMzQBnkuh_I5VicCfVtyvrl9MXSGEj51dLe/exec';
+      const resp = await fetch(SHEET_API_URL);
+      const apiData = await resp.json();
 
-      // Fetch from all forms
-      for (const [key, formId] of Object.entries(FORMS)) {
-        const rows = await fetchJotformSubmissions(formId);
-        allRows = [...allRows, ...rows];
-      }
+      const allRows = apiData.ntv || [];
+      const reviews = apiData.reviews || [];
 
       // Calculate metrics
       const ntvAll = allRows.length;
       const ntv12mo = allRows.filter(r => new Date(r.date) >= twelveAgo).length;
       const ntv6mo = allRows.filter(r => new Date(r.date) >= sixAgo).length;
+
+      // Calculate review rating
+      const avgRating = reviews.length > 0 ? (reviews.reduce((a, b) => a + b.stars, 0) / reviews.length).toFixed(1) : 4.4;
 
       // Build reason counts
       const reasonCounts = {};
@@ -89,8 +92,8 @@ const Dashboard = () => {
         ntvAll,
         ntv12mo,
         ntv6mo,
-        googleRating: 4.4,
-        googleCount: 725,
+        googleRating: parseFloat(avgRating),
+        googleCount: reviews.length,
         reasonCounts,
         quarterlyData,
         loading: false,
