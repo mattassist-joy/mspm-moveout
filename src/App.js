@@ -1,357 +1,363 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+
+const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbw5EF2qxIKlPIufd8Mhgv6AkYvy10tXkQMzQBnkuh_I5VicCfVtyvrl9MXSGEj51dLe/exec';
+
+const NAVY = '#1a3c5e';
+const GOLD = '#d4af37';
+const ALERT = '#c0392b';
+const SUCCESS = '#27ae60';
+const GRAY = '#6c757d';
+const LIGHT = '#f8f9fa';
+
+const REASON_CATEGORIES = [
+  'Military / PCS', 'Buying a home', 'Relocation / job', 'Cost / rent increase',
+  'Maintenance issues', 'Owner selling property', 'Lease expiration', 'Personal / family',
+  'Dissatisfied with management', 'Safety concerns', 'Other / unknown',
+];
+
+const CONTROLLABLE = new Set(['Cost / rent increase', 'Maintenance issues', 'Dissatisfied with management', 'Safety concerns']);
+
+// Industry benchmarks (property management)
+const BENCHMARKS = {
+  googleRating: 4.2,       // typical PM industry average
+  annualTurnoverRate: 50,  // % — industry avg annual turnover
+  controllablePct: 35,     // % of moveouts typically preventable
+};
+
+const fmtDate = (d) => {
+  const dt = new Date(d);
+  if (isNaN(dt)) return '';
+  return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+};
 
 const Dashboard = () => {
-  const [data, setData] = useState({
-    ntvAll: 0,
-    ntv12mo: 0,
-    ntv6mo: 0,
-    googleRating: 4.4,
-    googleCount: 725,
-    reasonCounts: {},
-    quarterlyData: [],
-    loading: true,
-    error: null,
-  });
-
-  const JOTFORM_API = '07ccb8c84ca28d60dab2a5392c24d5df';
-  const FORMS = {
-    ntv: '72854558878175',
-    ntv_relisting: '81987326013156',
-    move_out_items: '80006727478157',
-  };
-
-  const REASON_CATEGORIES = [
-    'Military / PCS', 'Buying a home', 'Relocation / job', 'Cost / rent increase',
-    'Maintenance issues', 'Owner selling property', 'Lease expiration', 'Personal / family',
-    'Dissatisfied with management', 'Safety concerns', 'Other / unknown',
-  ];
-
-  const controllable = new Set(['Cost / rent increase', 'Maintenance issues', 'Dissatisfied with management', 'Safety concerns']);
+  const [raw, setRaw] = useState({ ntv: [], reviews: [], lastSync: null, loading: true, error: null });
+  const [reviewStart, setReviewStart] = useState('');
+  const [reviewEnd, setReviewEnd] = useState('');
+  const [expandedReview, setExpandedReview] = useState(null);
+  const [showAllReviews, setShowAllReviews] = useState(false);
 
   useEffect(() => {
-    fetchData();
+    fetch(SHEET_API_URL)
+      .then(r => r.json())
+      .then(json => {
+        if (json.error) throw new Error(json.error);
+        setRaw({ ntv: json.ntv || [], reviews: json.reviews || [], lastSync: json.lastSync, loading: false, error: null });
+      })
+      .catch(err => setRaw(prev => ({ ...prev, loading: false, error: err.message })));
   }, []);
 
-  const fetchData = async () => {
-    try {
-      const now = new Date();
-      const sixAgo = new Date(now);
-      sixAgo.setMonth(now.getMonth() - 6);
-      const twelveAgo = new Date(now);
-      twelveAgo.setFullYear(now.getFullYear() - 1);
+  const now = new Date();
+  const sixAgo = new Date(now); sixAgo.setMonth(now.getMonth() - 6);
+  const twelveAgo = new Date(now); twelveAgo.setFullYear(now.getFullYear() - 1);
 
-      // Fetch from Google Sheet API endpoint
-      const SHEET_API_URL = 'https://script.google.com/macros/s/AKfycbw5EF2qxIKlPIufd8Mhgv6AkYvy10tXkQMzQBnkuh_I5VicCfVtyvrl9MXSGEj51dLe/exec';
-      const resp = await fetch(SHEET_API_URL);
-      const apiData = await resp.json();
+  const ntvAll = raw.ntv.length;
+  const ntv12mo = raw.ntv.filter(r => new Date(r.date) >= twelveAgo).length;
+  const ntv6mo = raw.ntv.filter(r => new Date(r.date) >= sixAgo).length;
 
-      const allRows = apiData.ntv || [];
-      const reviews = apiData.reviews || [];
+  const reasonCounts = useMemo(() => {
+    const counts = {};
+    REASON_CATEGORIES.forEach(c => { counts[c] = { all: 0, mo12: 0, mo6: 0 }; });
+    raw.ntv.forEach(row => {
+      const cat = REASON_CATEGORIES.includes(row.category) ? row.category : 'Other / unknown';
+      const d = new Date(row.date);
+      counts[cat].all++;
+      if (d >= twelveAgo) counts[cat].mo12++;
+      if (d >= sixAgo) counts[cat].mo6++;
+    });
+    return counts;
+  }, [raw.ntv]);
 
-      // Calculate metrics
-      const ntvAll = allRows.length;
-      const ntv12mo = allRows.filter(r => new Date(r.date) >= twelveAgo).length;
-      const ntv6mo = allRows.filter(r => new Date(r.date) >= sixAgo).length;
-
-      // Calculate review rating
-      const avgRating = reviews.length > 0 ? (reviews.reduce((a, b) => a + b.stars, 0) / reviews.length).toFixed(1) : 4.4;
-
-      // Build reason counts
-      const reasonCounts = {};
-      REASON_CATEGORIES.forEach(c => { reasonCounts[c] = { all: 0, mo12: 0, mo6: 0 }; });
-
-      allRows.forEach(row => {
-        const cat = row.category || 'Other / unknown';
-        const d = new Date(row.date);
-        if (!reasonCounts[cat]) reasonCounts[cat] = { all: 0, mo12: 0, mo6: 0 };
-        reasonCounts[cat].all++;
-        if (d >= twelveAgo) reasonCounts[cat].mo12++;
-        if (d >= sixAgo) reasonCounts[cat].mo6++;
-      });
-
-      // Build quarterly data
-      const qmap = {};
-      allRows.forEach(row => {
-        const d = new Date(row.date);
-        const yr = d.getFullYear();
-        const q = 'Q' + Math.ceil((d.getMonth() + 1) / 3);
-        if (!qmap[yr]) qmap[yr] = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
-        qmap[yr][q]++;
-      });
-
-      const quarterlyData = Object.keys(qmap).sort().map(yr => ({
-        year: yr,
-        q1: qmap[yr].Q1,
-        q2: qmap[yr].Q2,
-        q3: qmap[yr].Q3,
-        q4: qmap[yr].Q4,
-        total: qmap[yr].Q1 + qmap[yr].Q2 + qmap[yr].Q3 + qmap[yr].Q4,
-      }));
-
-      setData({
-        ntvAll,
-        ntv12mo,
-        ntv6mo,
-        googleRating: parseFloat(avgRating),
-        googleCount: reviews.length,
-        reasonCounts,
-        quarterlyData,
-        loading: false,
-        error: null,
-      });
-    } catch (err) {
-      setData(prev => ({ ...prev, error: err.message, loading: false }));
-    }
-  };
-
-  const fetchJotformSubmissions = async (formId) => {
-    const rows = [];
-    let offset = 0;
-
-    try {
-      while (true) {
-        const url = `https://api.jotform.com/form/${formId}/submissions?apiKey=${JOTFORM_API}&limit=1000&offset=${offset}&orderby=created_at,DESC`;
-        const resp = await fetch(url);
-        if (resp.status !== 200) break;
-
-        const jsonData = await resp.json();
-        const submissions = jsonData.content || [];
-        if (!submissions.length) break;
-
-        submissions.forEach(sub => {
-          const answers = sub.answers || {};
-          const created = sub.created_at || '';
-          const dateObj = created ? new Date(created) : null;
-
-          const reasonRaw = findAnswer(answers, ['reason','why','moving','vacating','purpose']) || '';
-          const comments = findAnswer(answers, ['comment','note','additional']) || '';
-          const category = categorizeReason(reasonRaw + ' ' + comments);
-
-          rows.push({
-            date: dateObj ? dateObj.toISOString().split('T')[0] : '',
-            category,
-          });
-        });
-
-        if (submissions.length < 1000) break;
-        offset += 1000;
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-    } catch (e) {
-      console.error('Error fetching form:', formId, e);
-    }
-
-    return rows;
-  };
-
-  const findAnswer = (answers, keywords) => {
-    for (const key in answers) {
-      const ans = answers[key];
-      const label = (ans.name || ans.text || '').toLowerCase();
-      if (keywords.some(k => label.includes(k.toLowerCase()))) {
-        const val = ans.answer;
-        if (!val) return '';
-        if (typeof val === 'string') return val.trim();
-        if (typeof val === 'object') {
-          if (val.first || val.last) return `${val.first || ''} ${val.last || ''}`.trim();
-          return Object.values(val).filter(Boolean).join(', ');
-        }
-      }
-    }
-    return '';
-  };
-
-  const categorizeReason = (text) => {
-    if (!text) return 'Other / unknown';
-    const t = text.toLowerCase();
-    if (/military|pcs|orders|deployment/.test(t)) return 'Military / PCS';
-    if (/buy|bought|purchas|home|own/.test(t)) return 'Buying a home';
-    if (/relocat|job|work|transfer|employ/.test(t)) return 'Relocation / job';
-    if (/rent|price|cost|afford|increas|budget/.test(t)) return 'Cost / rent increase';
-    if (/mold|maint|repair|broken|leak|hvac|pest/.test(t)) return 'Maintenance issues';
-    if (/owner|sell|sold|landlord/.test(t)) return 'Owner selling property';
-    if (/expir|end of lease|lease up|term/.test(t)) return 'Lease expiration';
-    if (/family|personal|parent|child|marriage|health/.test(t)) return 'Personal / family';
-    if (/dissatisf|unhappy|poor|management|staff/.test(t)) return 'Dissatisfied with management';
-    if (/safety|safe|crime|fear|dangerous/.test(t)) return 'Safety concerns';
-    return 'Other / unknown';
-  };
-
-  const totalAll = Object.values(data.reasonCounts).reduce((a, b) => a + (b.all || 0), 0);
+  const totalAll = Object.values(reasonCounts).reduce((a, b) => a + b.all, 0);
   let ctrlCount = 0, unctrlCount = 0;
   REASON_CATEGORIES.forEach(cat => {
-    const c = (data.reasonCounts[cat] || {}).all || 0;
-    if (controllable.has(cat)) ctrlCount += c; else unctrlCount += c;
+    const c = reasonCounts[cat].all;
+    if (CONTROLLABLE.has(cat)) ctrlCount += c; else unctrlCount += c;
   });
   const ctrlPct = totalAll > 0 ? Math.round(ctrlCount / totalAll * 100) : 0;
 
-  if (data.loading) {
+  const reasonChartData = REASON_CATEGORIES.map(cat => ({
+    name: cat.length > 16 ? cat.slice(0, 15) + '…' : cat,
+    fullName: cat,
+    count: reasonCounts[cat].all,
+    controllable: CONTROLLABLE.has(cat),
+  })).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+
+  const quarterlyData = useMemo(() => {
+    const qmap = {};
+    raw.ntv.forEach(row => {
+      const d = new Date(row.date);
+      if (isNaN(d)) return;
+      const yr = d.getFullYear();
+      const q = Math.ceil((d.getMonth() + 1) / 3);
+      const key = `${yr} Q${q}`;
+      qmap[key] = (qmap[key] || 0) + 1;
+    });
+    return Object.keys(qmap).sort().map(key => ({ period: key, moveouts: qmap[key] }));
+  }, [raw.ntv]);
+
+  const filteredReviews = useMemo(() => {
+    return raw.reviews.filter(r => {
+      const d = new Date(r.date);
+      if (isNaN(d)) return false;
+      if (reviewStart && d < new Date(reviewStart)) return false;
+      if (reviewEnd && d > new Date(reviewEnd)) return false;
+      return true;
+    }).sort((a, b) => new Date(b.date) - new Date(a.date));
+  }, [raw.reviews, reviewStart, reviewEnd]);
+
+  const avgRating = filteredReviews.length > 0
+    ? (filteredReviews.reduce((a, b) => a + (parseFloat(b.stars) || 0), 0) / filteredReviews.length)
+    : 0;
+
+  const allTimeAvgRating = raw.reviews.length
+    ? (raw.reviews.reduce((a, b) => a + (parseFloat(b.stars) || 0), 0) / raw.reviews.length)
+    : 0;
+
+  const ratingDistribution = useMemo(() => {
+    const dist = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    filteredReviews.forEach(r => {
+      const s = Math.round(parseFloat(r.stars) || 0);
+      if (dist[s] !== undefined) dist[s]++;
+    });
+    return [5, 4, 3, 2, 1].map(s => ({ stars: `${s}★`, count: dist[s] }));
+  }, [filteredReviews]);
+
+  const displayedReviews = showAllReviews ? filteredReviews : filteredReviews.slice(0, 8);
+
+  if (raw.loading) {
     return (
-      <div style={{ padding: '2rem', textAlign: 'center', color: '#6c757d' }}>
+      <div style={{ padding: '4rem', textAlign: 'center', color: GRAY, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
         Loading dashboard...
       </div>
     );
   }
 
+  if (raw.error) {
+    return (
+      <div style={{ padding: '4rem', textAlign: 'center', color: ALERT, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+        Error loading data: {raw.error}
+      </div>
+    );
+  }
+
+  const cardStyle = { background: 'white', padding: '1.5rem', borderRadius: '10px', border: '1px solid #e5e7eb', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
+  const sectionHeaderStyle = { background: NAVY, color: 'white', padding: '0.85rem 1.25rem', fontWeight: 700, fontSize: '13px', letterSpacing: '0.03em', borderRadius: '10px 10px 0 0' };
+  const panelStyle = { background: 'white', borderRadius: '10px', border: '1px solid #e5e7eb', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' };
+
   return (
-    <div style={{ background: '#f8f9fa', minHeight: '100vh' }}>
-      {/* Header */}
-      <div style={{ background: '#1a3c5e', color: 'white', padding: '1.5rem', textAlign: 'center' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>MSPM MOVE-OUT DASHBOARD</h1>
-        <p style={{ margin: '0.5rem 0 0 0', fontSize: '12px', opacity: 0.8 }}>
-          Generated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+    <div style={{ background: '#f4f5f7', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <div style={{ background: `linear-gradient(135deg, ${NAVY}, #0f2438)`, color: 'white', padding: '2rem 1.5rem', textAlign: 'center' }}>
+        <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800, letterSpacing: '0.01em' }}>MSPM MOVE-OUT &amp; REVIEWS DASHBOARD</h1>
+        <p style={{ margin: '0.5rem 0 0 0', fontSize: '12px', opacity: 0.75 }}>
+          Data synced daily 6 AM EST · Last sync: {raw.lastSync ? fmtDate(raw.lastSync) : '—'}
         </p>
       </div>
 
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem 1rem' }}>
-        {/* KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '2rem' }}>
-          <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #e1e0d9' }}>
-            <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '0.5rem' }}>Google Rating</div>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#d4af37' }}>
-              {data.googleRating} ★
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>{data.googleCount} reviews</div>
-          </div>
+      <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '2rem 1.25rem 4rem' }}>
 
-          <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #e1e0d9' }}>
-            <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '0.5rem' }}>All-Time Notices</div>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#1a3c5e' }}>
-              {data.ntvAll}
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>total submissions</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '14px', marginBottom: '1.5rem' }}>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '12px', color: GRAY, marginBottom: '0.4rem' }}>Google Rating (all-time)</div>
+            <div style={{ fontSize: '30px', fontWeight: 800, color: GOLD }}>{raw.reviews.length ? allTimeAvgRating.toFixed(1) : '—'} ★</div>
+            <div style={{ fontSize: '11px', color: GRAY }}>{raw.reviews.length} reviews · benchmark {BENCHMARKS.googleRating}★</div>
           </div>
-
-          <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #e1e0d9' }}>
-            <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '0.5rem' }}>Last 12 Months</div>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#1a3c5e' }}>
-              {data.ntv12mo}
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>move-outs</div>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '12px', color: GRAY, marginBottom: '0.4rem' }}>All-Time Move-Outs</div>
+            <div style={{ fontSize: '30px', fontWeight: 800, color: NAVY }}>{ntvAll}</div>
+            <div style={{ fontSize: '11px', color: GRAY }}>total submissions</div>
           </div>
-
-          <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #e1e0d9' }}>
-            <div style={{ fontSize: '12px', color: '#6c757d', marginBottom: '0.5rem' }}>Last 6 Months</div>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: '#1a3c5e' }}>
-              {data.ntv6mo}
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>move-outs</div>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '12px', color: GRAY, marginBottom: '0.4rem' }}>Last 12 Months</div>
+            <div style={{ fontSize: '30px', fontWeight: 800, color: NAVY }}>{ntv12mo}</div>
+            <div style={{ fontSize: '11px', color: GRAY }}>vs industry ~{BENCHMARKS.annualTurnoverRate}% turnover</div>
+          </div>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '12px', color: GRAY, marginBottom: '0.4rem' }}>Last 6 Months</div>
+            <div style={{ fontSize: '30px', fontWeight: 800, color: NAVY }}>{ntv6mo}</div>
+            <div style={{ fontSize: '11px', color: GRAY }}>move-outs</div>
           </div>
         </div>
 
-        {/* Retention Risk */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '2rem' }}>
-          <div style={{ background: '#ffe6e6', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #ffcccc' }}>
-            <div style={{ fontSize: '12px', color: '#c0392b', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-              ⚠ CONTROLLABLE FACTORS
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px', marginBottom: '1.5rem' }}>
+          <div style={{ ...cardStyle, background: '#fdecea', borderColor: '#f6cdc8' }}>
+            <div style={{ fontSize: '12px', color: ALERT, fontWeight: 700, marginBottom: '0.4rem' }}>⚠ CONTROLLABLE FACTORS</div>
+            <div style={{ fontSize: '26px', fontWeight: 800, color: ALERT }}>{ctrlCount} <span style={{ fontSize: '15px', fontWeight: 600 }}>({ctrlPct}%)</span></div>
+            <div style={{ fontSize: '11px', color: GRAY }}>
+              Industry benchmark: ~{BENCHMARKS.controllablePct}% preventable
+              {ctrlPct > BENCHMARKS.controllablePct ? ` · ${ctrlPct - BENCHMARKS.controllablePct}pt above benchmark` : ` · ${BENCHMARKS.controllablePct - ctrlPct}pt below benchmark`}
             </div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#c0392b' }}>
-              {ctrlCount}
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>{ctrlPct}% of total</div>
           </div>
-
-          <div style={{ background: '#e6f4e8', padding: '1.5rem', borderRadius: '8px', border: '0.5px solid #ccead1' }}>
-            <div style={{ fontSize: '12px', color: '#27ae60', marginBottom: '0.5rem', fontWeight: 'bold' }}>
-              ✓ EXTERNAL FACTORS
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#27ae60' }}>
-              {unctrlCount}
-            </div>
-            <div style={{ fontSize: '11px', color: '#6c757d' }}>{100 - ctrlPct}% of total</div>
+          <div style={{ ...cardStyle, background: '#eaf7ee', borderColor: '#c9ecd3' }}>
+            <div style={{ fontSize: '12px', color: SUCCESS, fontWeight: 700, marginBottom: '0.4rem' }}>✓ EXTERNAL FACTORS</div>
+            <div style={{ fontSize: '26px', fontWeight: 800, color: SUCCESS }}>{unctrlCount} <span style={{ fontSize: '15px', fontWeight: 600 }}>({100 - ctrlPct}%)</span></div>
+            <div style={{ fontSize: '11px', color: GRAY }}>PCS, buying homes, relocation, lease expiry — outside your control</div>
           </div>
         </div>
 
-        {/* Reason Breakdown Table */}
-        <div style={{ background: 'white', borderRadius: '8px', border: '0.5px solid #e1e0d9', marginBottom: '2rem', overflow: 'hidden' }}>
-          <div style={{ background: '#1a3c5e', color: 'white', padding: '1rem', fontWeight: 'bold', fontSize: '13px' }}>
-            MOVE-OUT REASON BREAKDOWN
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,1fr)', gap: '16px', marginBottom: '1.5rem' }}>
+          <div style={panelStyle}>
+            <div style={sectionHeaderStyle}>MOVE-OUT REASONS (ALL TIME)</div>
+            <div style={{ padding: '1.25rem 1rem 0.5rem' }}>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={reasonChartData} layout="vertical" margin={{ left: 10, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#eee" />
+                  <XAxis type="number" tick={{ fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
+                  <Tooltip formatter={(v, n, p) => [v, p.payload.fullName]} />
+                  <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                    {reasonChartData.map((entry, i) => (
+                      <Cell key={i} fill={entry.controllable ? ALERT : SUCCESS} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', fontSize: '11px', color: GRAY, paddingBottom: '0.75rem' }}>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: ALERT, borderRadius: 2, marginRight: 4 }}></span>Controllable</span>
+                <span><span style={{ display: 'inline-block', width: 10, height: 10, background: SUCCESS, borderRadius: 2, marginRight: 4 }}></span>External</span>
+              </div>
+            </div>
           </div>
+
+          <div style={panelStyle}>
+            <div style={sectionHeaderStyle}>QUARTERLY TREND</div>
+            <div style={{ padding: '1.25rem 1rem 0.5rem' }}>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={quarterlyData} margin={{ left: 0, right: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+                  <XAxis dataKey="period" tick={{ fontSize: 9 }} angle={-45} textAnchor="end" height={60} />
+                  <YAxis tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="moveouts" stroke={NAVY} strokeWidth={2.5} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ ...panelStyle, marginBottom: '1.5rem' }}>
+          <div style={sectionHeaderStyle}>MOVE-OUT REASON BREAKDOWN — DETAIL</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
-              <tr style={{ background: '#2c5f8a', color: 'white', fontWeight: 'bold' }}>
-                <th style={{ padding: '12px', textAlign: 'left', borderRight: '0.5px solid #e1e0d9' }}>Reason</th>
-                <th style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>All Time</th>
-                <th style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>Last 12 Mo</th>
-                <th style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>Last 6 Mo</th>
-                <th style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>% Total</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Type</th>
+              <tr style={{ background: '#2c5f8a', color: 'white' }}>
+                <th style={{ padding: '10px 12px', textAlign: 'left' }}>Reason</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>All Time</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>Last 12 Mo</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>Last 6 Mo</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>% Total</th>
+                <th style={{ padding: '10px 12px', textAlign: 'center' }}>Type</th>
               </tr>
             </thead>
             <tbody>
               {REASON_CATEGORIES.map((cat, i) => {
-                const counts = data.reasonCounts[cat] || { all: 0, mo12: 0, mo6: 0 };
-                const pct = totalAll > 0 ? ((counts.all / totalAll * 100).toFixed(1)) : '0.0';
-                const isCtrl = controllable.has(cat);
-                const bg = i % 2 === 0 ? '#f8f9fa' : 'white';
-
+                const counts = reasonCounts[cat];
+                const pct = totalAll > 0 ? (counts.all / totalAll * 100).toFixed(1) : '0.0';
+                const isCtrl = CONTROLLABLE.has(cat);
                 return (
-                  <tr key={cat} style={{ background: bg, borderBottom: '0.5px solid #e1e0d9' }}>
-                    <td style={{ padding: '12px', borderRight: '0.5px solid #e1e0d9' }}>{cat}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>{counts.all}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>{counts.mo12}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>{counts.mo6}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>{pct}%</td>
-                    <td style={{ 
-                      padding: '12px', 
-                      textAlign: 'center', 
-                      color: isCtrl ? '#c0392b' : '#27ae60',
-                      fontWeight: 'bold',
-                      fontSize: '11px'
-                    }}>
+                  <tr key={cat} style={{ background: i % 2 === 0 ? LIGHT : 'white', borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '9px 12px' }}>{cat}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>{counts.all}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>{counts.mo12}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>{counts.mo6}</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'center' }}>{pct}%</td>
+                    <td style={{ padding: '9px 12px', textAlign: 'center', fontWeight: 700, fontSize: '11px', color: isCtrl ? ALERT : SUCCESS }}>
                       {isCtrl ? '⚠ CTRL' : '✓ EXT'}
                     </td>
                   </tr>
                 );
               })}
-              <tr style={{ background: '#1a3c5e', color: 'white', fontWeight: 'bold' }}>
-                <td style={{ padding: '12px', borderRight: '0.5px solid #e1e0d9' }}>TOTAL</td>
-                <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>{totalAll}</td>
-                <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>—</td>
-                <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>—</td>
-                <td style={{ padding: '12px', textAlign: 'center', borderRight: '0.5px solid #e1e0d9' }}>100%</td>
-                <td style={{ padding: '12px', textAlign: 'center' }}>—</td>
+              <tr style={{ background: NAVY, color: 'white', fontWeight: 700 }}>
+                <td style={{ padding: '10px 12px' }}>TOTAL</td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>{totalAll}</td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>—</td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>—</td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>100%</td>
+                <td style={{ padding: '10px 12px', textAlign: 'center' }}>—</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        {/* Quarterly Trend */}
-        <div style={{ background: 'white', borderRadius: '8px', border: '0.5px solid #e1e0d9', overflow: 'hidden' }}>
-          <div style={{ background: '#1a3c5e', color: 'white', padding: '1rem', fontWeight: 'bold', fontSize: '13px' }}>
-            QUARTERLY TREND
+        <div style={{ ...panelStyle, marginBottom: '1.5rem' }}>
+          <div style={{ ...sectionHeaderStyle, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <span>GOOGLE REVIEWS {reviewStart || reviewEnd ? '(FILTERED)' : ''}</span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontWeight: 400 }}>
+              <input type="date" value={reviewStart} onChange={e => setReviewStart(e.target.value)}
+                style={{ fontSize: '11px', padding: '4px 6px', borderRadius: '4px', border: 'none' }} />
+              <span style={{ fontSize: '11px' }}>to</span>
+              <input type="date" value={reviewEnd} onChange={e => setReviewEnd(e.target.value)}
+                style={{ fontSize: '11px', padding: '4px 6px', borderRadius: '4px', border: 'none' }} />
+              {(reviewStart || reviewEnd) && (
+                <button onClick={() => { setReviewStart(''); setReviewEnd(''); }}
+                  style={{ fontSize: '11px', padding: '4px 8px', borderRadius: '4px', border: 'none', background: GOLD, color: NAVY, fontWeight: 700, cursor: 'pointer' }}>
+                  Clear
+                </button>
+              )}
+            </div>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ background: '#2c5f8a', color: 'white', fontWeight: 'bold' }}>
-                <th style={{ padding: '12px', textAlign: 'left' }}>Year</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Q1</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Q2</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Q3</th>
-                <th style={{ padding: '12px', textAlign: 'center' }}>Q4</th>
-                <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>Annual</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.quarterlyData.map((row, i) => {
-                const bg = i % 2 === 0 ? '#f8f9fa' : 'white';
-                return (
-                  <tr key={row.year} style={{ background: bg, borderBottom: '0.5px solid #e1e0d9' }}>
-                    <td style={{ padding: '12px' }}>{row.year}</td>
-                    <td style={{ padding: '12px', textAlign: 'center' }}>{row.q1}</td>
-                    <td style={{ padding: '12px', textAlign: 'center' }}>{row.q2}</td>
-                    <td style={{ padding: '12px', textAlign: 'center' }}>{row.q3}</td>
-                    <td style={{ padding: '12px', textAlign: 'center' }}>{row.q4}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>{row.total}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+
+          <div style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', gap: '2rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '11px', color: GRAY }}>Avg rating in range</div>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: GOLD }}>{avgRating ? avgRating.toFixed(1) : '—'} ★</div>
+              </div>
+              <div>
+                <div style={{ fontSize: '11px', color: GRAY }}>Reviews in range</div>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: NAVY }}>{filteredReviews.length}</div>
+              </div>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <ResponsiveContainer width="100%" height={70}>
+                  <BarChart data={ratingDistribution} layout="vertical" margin={{ top: 0, bottom: 0, left: 0, right: 10 }}>
+                    <XAxis type="number" hide />
+                    <YAxis type="category" dataKey="stars" width={28} tick={{ fontSize: 10 }} />
+                    <Bar dataKey="count" fill={GOLD} radius={[0, 3, 3, 0]} barSize={10} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {displayedReviews.length === 0 ? (
+              <div style={{ color: GRAY, fontSize: '13px', textAlign: 'center', padding: '2rem 0' }}>No reviews in this date range.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {displayedReviews.map((rev, i) => {
+                  const isOpen = expandedReview === i;
+                  return (
+                    <div key={i} onClick={() => setExpandedReview(isOpen ? null : i)}
+                      style={{ border: '1px solid #eee', borderRadius: '8px', padding: '10px 14px', cursor: 'pointer', background: isOpen ? LIGHT : 'white' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontWeight: 700, fontSize: '13px' }}>{rev.reviewer || 'Anonymous'}</span>
+                          <span style={{ marginLeft: '10px', color: GOLD, fontSize: '13px' }}>{'★'.repeat(Math.round(parseFloat(rev.stars) || 0))}</span>
+                        </div>
+                        <span style={{ fontSize: '11px', color: GRAY }}>{fmtDate(rev.date)}</span>
+                      </div>
+                      {isOpen && (
+                        <div style={{ marginTop: '8px', fontSize: '13px', color: '#333', lineHeight: 1.5 }}>
+                          {rev.text || <em style={{ color: GRAY }}>No written review text.</em>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {filteredReviews.length > 8 && (
+              <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+                <button onClick={() => setShowAllReviews(!showAllReviews)}
+                  style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '6px', border: `1px solid ${NAVY}`, background: 'white', color: NAVY, fontWeight: 600, cursor: 'pointer' }}>
+                  {showAllReviews ? 'Show fewer' : `Show all ${filteredReviews.length} reviews`}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ textAlign: 'center', marginTop: '2rem', fontSize: '11px', color: '#6c757d' }}>
-          Dashboard updated: {new Date().toLocaleString()}
+        <div style={{ textAlign: 'center', fontSize: '11px', color: GRAY, paddingTop: '0.5rem' }}>
+          Source of truth: Google Sheet · Synced daily 6 AM EST
         </div>
       </div>
     </div>
