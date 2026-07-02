@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/mspm-moveout/static/css/main.e6c13ad2.css",
+    "main.js": "/mspm-moveout/static/js/main.c324157a.js",
+    "static/js/453.89be707a.chunk.js": "/mspm-moveout/static/js/453.89be707a.chunk.js",
+    "index.html": "/mspm-moveout/index.html",
+    "main.e6c13ad2.css.map": "/mspm-moveout/static/css/main.e6c13ad2.css.map",
+    "main.c324157a.js.map": "/mspm-moveout/static/js/main.c324157a.js.map",
+    "453.89be707a.chunk.js.map": "/mspm-moveout/static/js/453.89be707a.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e6c13ad2.css",
+    "static/js/main.c324157a.js"
+  ]
+}
