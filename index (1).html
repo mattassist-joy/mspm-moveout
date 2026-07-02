@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSPM Move-Out & Reviews Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --navy: #1a3c5e;
+    --navy-dark: #12293f;
+    --gold: #d4af37;
+    --gray: #6c757d;
+    --light: #f8f9fa;
+    --alert: #c0392b;
+    --alert-bg: #fdecea;
+    --success: #27ae60;
+    --success-bg: #eaf7ef;
+    --border: #e3e7eb;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #eef1f4; color: #212529; }
+
+  header {
+    background: linear-gradient(180deg, var(--navy) 0%, var(--navy-dark) 100%);
+    color: #fff; text-align: center; padding: 28px 16px 22px;
+  }
+  header h1 { font-size: 26px; letter-spacing: 0.5px; }
+  header h1 .accent { color: var(--gold); }
+  header .sub { font-size: 12px; color: #aabfcf; margin-top: 6px; }
+
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+  .card {
+    background: #fff; border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px 20px; box-shadow: 0 1px 3px rgba(26,60,94,.06);
+  }
+  .card .label { font-size: 12px; color: var(--gray); margin-bottom: 6px; }
+  .card .big { font-size: 32px; font-weight: 700; color: var(--navy); }
+  .card .big.gold { color: var(--gold); }
+  .card .note { font-size: 11px; color: var(--gray); margin-top: 4px; }
+
+  .factor-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .factor { border-radius: 8px; padding: 16px 20px; border: 1px solid var(--border); }
+  .factor.ctrl { background: var(--alert-bg); }
+  .factor.ext { background: var(--success-bg); }
+  .factor .label { font-size: 12px; font-weight: 700; }
+  .factor.ctrl .label { color: var(--alert); }
+  .factor.ext .label { color: var(--success); }
+  .factor .big { font-size: 28px; font-weight: 700; }
+  .factor.ctrl .big { color: var(--alert); }
+  .factor.ext .big { color: var(--success); }
+  .factor .pct { font-size: 14px; font-weight: 400; color: var(--gray); }
+  .factor .note { font-size: 11px; color: var(--gray); margin-top: 4px; }
+
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .panel { background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .panel h2 {
+    background: var(--navy); color: #fff; font-size: 13px; letter-spacing: 0.5px;
+    padding: 10px 16px; border-bottom: 3px solid var(--gold);
+  }
+  .panel .body { padding: 16px; }
+  .chart-box { position: relative; height: 320px; }
+
+  /* Reviews */
+  .reviews-panel { margin-top: 16px; }
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 12px 16px; background: var(--light); border-bottom: 1px solid var(--border);
+  }
+  .filters label { font-size: 12px; color: var(--gray); }
+  .filters input[type="date"], .filters select {
+    padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+  }
+  .preset { display: flex; gap: 6px; }
+  .preset button {
+    background: #fff; border: 1px solid var(--border); border-radius: 14px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; color: var(--navy);
+  }
+  .preset button.active, .preset button:hover { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .review-stats { font-size: 12px; color: var(--gray); margin-left: auto; }
+  .review-stats b { color: var(--navy); font-size: 14px; }
+
+  .review-list { max-height: 480px; overflow-y: auto; }
+  .review-item { border-bottom: 1px solid var(--border); padding: 12px 16px; cursor: pointer; }
+  .review-item:hover { background: var(--light); }
+  .review-head { display: flex; align-items: center; gap: 10px; }
+  .review-head .stars { color: var(--gold); font-size: 14px; letter-spacing: 1px; white-space: nowrap; }
+  .review-head .who { font-weight: 600; font-size: 13px; color: var(--navy); }
+  .review-head .when { font-size: 11px; color: var(--gray); margin-left: auto; white-space: nowrap; }
+  .review-snippet { font-size: 12px; color: #444; margin-top: 4px;
+    overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .review-item.open .review-snippet { -webkit-line-clamp: unset; }
+  .review-item .link { font-size: 11px; margin-top: 6px; display: none; }
+  .review-item.open .link { display: block; }
+  .review-item .link a { color: var(--navy); }
+  .empty { padding: 24px 16px; text-align: center; color: var(--gray); font-size: 13px; }
+
+  .loading { text-align: center; padding: 60px 20px; color: var(--gray); }
+  .spinner {
+    width: 36px; height: 36px; border: 4px solid var(--border); border-top-color: var(--gold);
+    border-radius: 50%; margin: 0 auto 12px; animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { background: var(--alert-bg); color: var(--alert); padding: 16px; border-radius: 8px; margin-top: 20px; font-size: 13px; }
+
+  footer { text-align: center; font-size: 11px; color: var(--gray); padding: 16px; }
+
+  @media (max-width: 760px) {
+    .factor-row, .chart-row { grid-template-columns: 1fr; }
+    .review-stats { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MSPM <span class="accent">MOVE-OUT &amp; REVIEWS</span> DASHBOARD</h1>
+  <div class="sub" id="syncInfo">Data synced daily 6 AM EST</div>
+</header>
+
+<div class="wrap">
+  <div id="loading" class="loading"><div class="spinner"></div>Loading data from Google Sheets…</div>
+  <div id="errorBox" class="error" style="display:none"></div>
+
+  <div id="content" style="display:none">
+    <!-- KPI CARDS -->
+    <div class="kpi-row">
+      <div class="card">
+        <div class="label">Google Rating (official)</div>
+        <div class="big gold" id="kpiRating">–</div>
+        <div class="note" id="kpiRatingNote"></div>
+      </div>
+      <div class="card">
+        <div class="label">All-Time Move-Outs</div>
+        <div class="big" id="kpiAll">–</div>
+        <div class="note">total submissions</div>
+      </div>
+      <div class="card">
+        <div class="label">Last 12 Months</div>
+        <div class="big" id="kpi12">–</div>
+        <div class="note">move-outs</div>
+      </div>
+      <div class="card">
+        <div class="label">Last 6 Months</div>
+        <div class="big" id="kpi6">–</div>
+        <div class="note">move-outs</div>
+      </div>
+    </div>
+
+    <!-- CONTROLLABLE / EXTERNAL -->
+    <div class="factor-row">
+      <div class="factor ctrl">
+        <div class="label">⚠ CONTROLLABLE FACTORS</div>
+        <div class="big"><span id="ctrlCount">–</span> <span class="pct" id="ctrlPct"></span></div>
+        <div class="note">Cost, maintenance, management, safety — preventable</div>
+      </div>
+      <div class="factor ext">
+        <div class="label">✓ EXTERNAL FACTORS</div>
+        <div class="big"><span id="extCount">–</span> <span class="pct" id="extPct"></span></div>
+        <div class="note">PCS, buying homes, relocation, lease expiry — outside your control</div>
+      </div>
+    </div>
+
+    <!-- CHARTS -->
+    <div class="chart-row">
+      <div class="panel">
+        <h2>MOVE-OUT REASONS (ALL TIME)</h2>
+        <div class="body"><div class="chart-box"><canvas id="reasonChart"></canvas></div></div>
+      </div>
+      <div class="panel">
+        <h2>QUARTERLY TREND</h2>
+        <div class="body"><div class="chart-box"><canvas id="trendChart"></canvas></div></div>
+      </div>
+    </div>
+
+    <!-- REVIEWS -->
+    <div class="panel reviews-panel">
+      <h2>REVIEWS — FILTER &amp; DRILL DOWN</h2>
+      <div class="filters">
+        <div class="preset">
+          <button data-days="30">30d</button>
+          <button data-days="90">90d</button>
+          <button data-days="365">12mo</button>
+          <button data-days="0" class="active">All</button>
+        </div>
+        <label>From <input type="date" id="dateFrom"></label>
+        <label>To <input type="date" id="dateTo"></label>
+        <label>Stars
+          <select id="starFilter">
+            <option value="0">All</option>
+            <option value="5">5★</option><option value="4">4★</option>
+            <option value="3">3★</option><option value="2">2★</option><option value="1">1★</option>
+          </select>
+        </label>
+        <div class="review-stats">
+          <b id="filtCount">0</b> reviews · avg <b id="filtAvg">–</b>★ in range
+        </div>
+      </div>
+      <div class="review-list" id="reviewList"></div>
+    </div>
+  </div>
+</div>
+
+<footer>Middleton Street Property Management · Auto-refreshes from Google Sheets on page load</footer>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+// PASTE YOUR APPS SCRIPT WEB APP URL BELOW (ends in /exec)
+// ══════════════════════════════════════════════════════════════
+const API_URL = 'https://script.google.com/macros/s/AKfycbw5EF2qxIKlPIufd8Mhgv6AkYvy10tXkQMzQBnkuh_I5VicCfVtyvrl9MXSGEj51dLe/exec';
+
+const NAVY = '#1a3c5e', GOLD = '#d4af37', ALERT = '#c0392b', SUCCESS = '#27ae60';
+const CONTROLLABLE = new Set(['Cost / rent increase','Maintenance issues','Dissatisfied with management','Safety concerns']);
+const CATEGORIES = ['Military / PCS','Buying a home','Relocation / job','Cost / rent increase','Maintenance issues',
+  'Owner selling property','Lease expiration','Personal / family','Dissatisfied with management','Safety concerns','Other / unknown'];
+
+let allReviews = [];
+
+init();
+
+async function init() {
+  try {
+    const resp = await fetch(API_URL);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    render(data);
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    const box = document.getElementById('errorBox');
+    box.style.display = 'block';
+    box.textContent = 'Could not load data: ' + e.message + ' — check that API_URL is set to your Apps Script web app URL and the deployment allows "Anyone" access.';
+  }
+}
+
+function render(data) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  // Sync info
+  if (data.lastSync) {
+    const d = new Date(data.lastSync);
+    document.getElementById('syncInfo').textContent =
+      'Data synced daily 6 AM EST · Last sync: ' + d.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+  }
+
+  // KPIs
+  const ntv = data.ntv || [];
+  const now = new Date();
+  const ago6 = new Date(now); ago6.setMonth(now.getMonth() - 6);
+  const ago12 = new Date(now); ago12.setFullYear(now.getFullYear() - 1);
+
+  const rating = data.googleRating || 0;
+  const count = data.googleReviewCount || 0;
+  document.getElementById('kpiRating').textContent = rating.toFixed(1) + ' ★';
+  document.getElementById('kpiRatingNote').textContent = count + ' reviews · from Google';
+
+  document.getElementById('kpiAll').textContent = ntv.length.toLocaleString();
+  document.getElementById('kpi12').textContent = ntv.filter(r => inRange(r.date, ago12)).length;
+  document.getElementById('kpi6').textContent = ntv.filter(r => inRange(r.date, ago6)).length;
+
+  // Controllable / external
+  let ctrl = 0;
+  ntv.forEach(r => { if (CONTROLLABLE.has(r.category)) ctrl++; });
+  const ext = ntv.length - ctrl;
+  const cPct = ntv.length ? Math.round(ctrl / ntv.length * 100) : 0;
+  document.getElementById('ctrlCount').textContent = ctrl.toLocaleString();
+  document.getElementById('ctrlPct').textContent = '(' + cPct + '%)';
+  document.getElementById('extCount').textContent = ext.toLocaleString();
+  document.getElementById('extPct').textContent = '(' + (100 - cPct) + '%)';
+
+  buildReasonChart(ntv);
+  buildTrendChart(ntv);
+
+  // Reviews
+  allReviews = (data.reviews || []).map(r => ({...r, dateObj: new Date(r.date)}))
+    .filter(r => !isNaN(r.dateObj))
+    .sort((a, b) => b.dateObj - a.dateObj);
+  setupReviewFilters();
+  applyReviewFilter();
+}
+
+function inRange(dateStr, since) {
+  const d = new Date(dateStr);
+  return !isNaN(d) && d >= since;
+}
+
+function buildReasonChart(ntv) {
+  const counts = {};
+  CATEGORIES.forEach(c => counts[c] = 0);
+  ntv.forEach(r => { counts[r.category] = (counts[r.category] || 0) + 1; });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  new Chart(document.getElementById('reasonChart'), {
+    type: 'bar',
+    data: {
+      labels: sorted.map(s => s[0]),
+      datasets: [{
+        data: sorted.map(s => s[1]),
+        backgroundColor: sorted.map(s => CONTROLLABLE.has(s[0]) ? ALERT : SUCCESS),
+      }]
+    },
+    options: {
+      indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { grid: { color: '#eef1f4' } }, y: { ticks: { font: { size: 10 } }, grid: { display: false } } }
+    }
+  });
+}
+
+function buildTrendChart(ntv) {
+  const qmap = {};
+  ntv.forEach(r => {
+    if (!r.year || !r.quarter) return;
+    const key = r.year + ' ' + r.quarter;
+    qmap[key] = (qmap[key] || 0) + 1;
+  });
+  const keys = Object.keys(qmap).sort((a, b) => {
+    const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
+    return ya - yb || qa.localeCompare(qb);
+  });
+
+  new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: keys,
+      datasets: [{
+        label: 'Move-outs', data: keys.map(k => qmap[k]),
+        borderColor: NAVY, backgroundColor: NAVY, pointRadius: 3, tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { font: { size: 9 }, maxRotation: 60 }, grid: { display: false } },
+        y: { beginAtZero: true, grid: { color: '#eef1f4' } }
+      }
+    }
+  });
+}
+
+// ── REVIEWS FILTER + DRILL-DOWN ──────────────────────────────
+
+function setupReviewFilters() {
+  document.querySelectorAll('.preset button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.preset button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const days = parseInt(btn.dataset.days);
+      const toInput = document.getElementById('dateTo');
+      const fromInput = document.getElementById('dateFrom');
+      if (days === 0) { fromInput.value = ''; toInput.value = ''; }
+      else {
+        const to = new Date();
+        const from = new Date(); from.setDate(from.getDate() - days);
+        fromInput.value = from.toISOString().slice(0, 10);
+        toInput.value = to.toISOString().slice(0, 10);
+      }
+      applyReviewFilter();
+    });
+  });
+  ['dateFrom', 'dateTo', 'starFilter'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      document.querySelectorAll('.preset button').forEach(b => b.classList.remove('active'));
+      applyReviewFilter();
+    });
+  });
+}
+
+function applyReviewFilter() {
+  const fromVal = document.getElementById('dateFrom').value;
+  const toVal = document.getElementById('dateTo').value;
+  const star = parseInt(document.getElementById('starFilter').value);
+  const from = fromVal ? new Date(fromVal) : null;
+  const to = toVal ? new Date(toVal + 'T23:59:59') : null;
+
+  const filtered = allReviews.filter(r => {
+    if (from && r.dateObj < from) return false;
+    if (to && r.dateObj > to) return false;
+    if (star && Math.round(r.stars) !== star) return false;
+    return true;
+  });
+
+  document.getElementById('filtCount').textContent = filtered.length;
+  const avg = filtered.length ? (filtered.reduce((s, r) => s + r.stars, 0) / filtered.length).toFixed(1) : '–';
+  document.getElementById('filtAvg').textContent = avg;
+
+  const list = document.getElementById('reviewList');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty">No reviews in this range.</div>';
+    return;
+  }
+  list.innerHTML = filtered.map((r, i) => `
+    <div class="review-item" data-i="${i}">
+      <div class="review-head">
+        <span class="stars">${'★'.repeat(Math.round(r.stars))}${'☆'.repeat(Math.max(0, 5 - Math.round(r.stars)))}</span>
+        <span class="who">${esc(r.reviewer)}</span>
+        <span class="when">${r.dateObj.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})}</span>
+      </div>
+      <div class="review-snippet">${esc(r.text) || '<i>No text — rating only</i>'}</div>
+      ${r.url ? `<div class="link"><a href="${esc(r.url)}" target="_blank" rel="noopener">View on Google →</a></div>` : ''}
+    </div>`).join('');
+
+  list.querySelectorAll('.review-item').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('open'));
+  });
+}
+
+function esc(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
