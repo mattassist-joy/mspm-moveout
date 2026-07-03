@@ -184,6 +184,28 @@
           <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
       </label>
+      <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmpOn"> Compare</label>
+      <span id="cmpFilters" style="display:none">
+        <label>vs Year
+          <select id="cmpYear"><option value="0">All</option></select>
+        </label>
+        <label>Quarter
+          <select id="cmpQuarter">
+            <option value="0">All</option>
+            <option value="Q1">Q1</option><option value="Q2">Q2</option>
+            <option value="Q3">Q3</option><option value="Q4">Q4</option>
+          </select>
+        </label>
+        <label>Month
+          <select id="cmpMonth">
+            <option value="0">All</option>
+            <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+            <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+            <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+            <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+          </select>
+        </label>
+      </span>
       <div class="review-stats"><b id="fltTotal">0</b> move-outs in selection</div>
     </div>
 
@@ -313,67 +335,83 @@ function inRange(dateStr, since) {
   return !isNaN(d) && d >= since;
 }
 
-function buildReasonChart(ntv) {
-  const counts = {};
-  CATEGORIES.forEach(c => counts[c] = 0);
-  ntv.forEach(r => { counts[r.category] = (counts[r.category] || 0) + 1; });
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+function buildReasonChart(ntv, ntvB, labelA, labelB) {
+  const countCats = rows => {
+    const c = {};
+    CATEGORIES.forEach(k => c[k] = 0);
+    rows.forEach(r => { c[r.category] = (c[r.category] || 0) + 1; });
+    return c;
+  };
+  const cA = countCats(ntv);
+  const sorted = Object.entries(cA).sort((a, b) => b[1] - a[1]);
+  const cats = sorted.map(s => s[0]);
+
+  const datasets = ntvB
+    ? [
+        { label: labelA, data: cats.map(k => cA[k]), backgroundColor: NAVY },
+        { label: labelB, data: (c => cats.map(k => c[k] || 0))(countCats(ntvB)), backgroundColor: GOLD },
+      ]
+    : [{ data: sorted.map(s => s[1]), backgroundColor: cats.map(k => CONTROLLABLE.has(k) ? ALERT : SUCCESS) }];
 
   if (reasonChartRef) reasonChartRef.destroy();
   reasonChartRef = new Chart(document.getElementById('reasonChart'), {
     type: 'bar',
-    data: {
-      labels: sorted.map(s => s[0]),
-      datasets: [{
-        data: sorted.map(s => s[1]),
-        backgroundColor: sorted.map(s => CONTROLLABLE.has(s[0]) ? ALERT : SUCCESS),
-      }]
-    },
+    data: { labels: cats, datasets: datasets },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: !!ntvB, position: 'bottom', labels: { font: { size: 10 } } } },
       scales: { x: { grid: { color: '#eef1f4' } }, y: { ticks: { font: { size: 10 } }, grid: { display: false } } }
     }
   });
 }
 
-function buildTrendChart(ntv, monthly) {
+function buildTrendChart(ntv, monthly, ntvB, labelA, labelB) {
   const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const qmap = {};
+  const agg = rows => {
+    const map = {};
+    if (monthly) {
+      rows.forEach(r => { const m = parseInt(r.month); if (m) map[m] = (map[m] || 0) + 1; });
+    } else {
+      rows.forEach(r => {
+        if (!r.year || !r.quarter) return;
+        const key = r.year + ' ' + r.quarter;
+        map[key] = (map[key] || 0) + 1;
+      });
+    }
+    return map;
+  };
+
+  const mapA = agg(ntv);
+  const mapB = ntvB ? agg(ntvB) : null;
+
   let keys;
   if (monthly) {
-    ntv.forEach(r => {
-      const m = parseInt(r.month);
-      if (!m) return;
-      qmap[m] = (qmap[m] || 0) + 1;
-    });
-    keys = Object.keys(qmap).map(Number).sort((a, b) => a - b);
+    const ks = new Set([...Object.keys(mapA), ...(mapB ? Object.keys(mapB) : [])].map(Number));
+    keys = [...ks].sort((a, b) => a - b);
   } else {
-    ntv.forEach(r => {
-      if (!r.year || !r.quarter) return;
-      const key = r.year + ' ' + r.quarter;
-      qmap[key] = (qmap[key] || 0) + 1;
-    });
-    keys = Object.keys(qmap).sort((a, b) => {
+    keys = Object.keys(mapA).sort((a, b) => {
       const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
       return ya - yb || qa.localeCompare(qb);
     });
   }
   const labels = monthly ? keys.map(k => MONTHS[k - 1]) : keys;
 
+  const datasets = [{
+    label: labelA || 'Move-outs', data: keys.map(k => mapA[k] || 0),
+    borderColor: NAVY, backgroundColor: NAVY, pointRadius: 3, tension: 0.3,
+  }];
+  if (mapB) datasets.push({
+    label: labelB, data: keys.map(k => mapB[k] || 0),
+    borderColor: GOLD, backgroundColor: GOLD, pointRadius: 3, tension: 0.3,
+  });
+
   if (trendChartRef) trendChartRef.destroy();
   trendChartRef = new Chart(document.getElementById('trendChart'), {
     type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Move-outs', data: keys.map(k => qmap[k]),
-        borderColor: NAVY, backgroundColor: NAVY, pointRadius: 3, tension: 0.3,
-      }]
-    },
+    data: { labels: labels, datasets: datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: { legend: { display: !!mapB, position: 'bottom', labels: { font: { size: 10 } } } },
       scales: {
         x: { ticks: { font: { size: 9 }, maxRotation: 60 }, grid: { display: false } },
         y: { beginAtZero: true, grid: { color: '#eef1f4' } }
@@ -386,41 +424,75 @@ function buildTrendChart(ntv, monthly) {
 
 function setupChartFilters(ntv) {
   const years = [...new Set(ntv.map(r => parseInt(r.year)).filter(Boolean))].sort((a, b) => b - a);
-  const yearSel = document.getElementById('fltYear');
-  years.forEach(y => {
-    const o = document.createElement('option');
-    o.value = y; o.textContent = y;
-    yearSel.appendChild(o);
+  ['fltYear', 'cmpYear'].forEach(id => {
+    const sel = document.getElementById(id);
+    years.forEach(y => {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      sel.appendChild(o);
+    });
   });
-  ['fltYear', 'fltQuarter', 'fltMonth'].forEach(id =>
+  ['fltYear','fltQuarter','fltMonth','cmpYear','cmpQuarter','cmpMonth'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyChartFilter));
+  document.getElementById('cmpOn').addEventListener('change', () => {
+    document.getElementById('cmpFilters').style.display =
+      document.getElementById('cmpOn').checked ? 'inline' : 'none';
+    applyChartFilter();
+  });
+}
+
+function readFilter_(yId, qId, mId) {
+  return {
+    y: parseInt(document.getElementById(yId).value),
+    q: document.getElementById(qId).value,
+    m: parseInt(document.getElementById(mId).value),
+  };
+}
+
+function filterNTV_(f) {
+  return allNTV.filter(r => {
+    if (f.y && parseInt(r.year) !== f.y) return false;
+    if (f.q !== '0' && r.quarter !== f.q) return false;
+    if (f.m && parseInt(r.month) !== f.m) return false;
+    return true;
+  });
+}
+
+function filterLabel_(f) {
+  const parts = [];
+  if (f.m) parts.push(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][f.m - 1]);
+  if (f.q !== '0') parts.push(f.q);
+  if (f.y) parts.push(f.y);
+  return parts.length ? parts.join(' ') : 'ALL TIME';
 }
 
 function applyChartFilter() {
-  const y = parseInt(document.getElementById('fltYear').value);
-  const q = document.getElementById('fltQuarter').value;
-  const m = parseInt(document.getElementById('fltMonth').value);
+  const fA = readFilter_('fltYear', 'fltQuarter', 'fltMonth');
+  const dataA = filterNTV_(fA);
+  const labelA = filterLabel_(fA);
+  const compare = document.getElementById('cmpOn').checked;
 
-  const filtered = allNTV.filter(r => {
-    if (y && parseInt(r.year) !== y) return false;
-    if (q !== '0' && r.quarter !== q) return false;
-    if (m && parseInt(r.month) !== m) return false;
-    return true;
-  });
+  let dataB = null, labelB = '';
+  if (compare) {
+    const fB = readFilter_('cmpYear', 'cmpQuarter', 'cmpMonth');
+    dataB = filterNTV_(fB);
+    labelB = filterLabel_(fB);
+  }
 
-  document.getElementById('fltTotal').textContent = filtered.length.toLocaleString();
+  document.getElementById('fltTotal').textContent = compare
+    ? dataA.length.toLocaleString() + ' vs ' + dataB.length.toLocaleString()
+    : dataA.length.toLocaleString();
 
-  const parts = [];
-  if (m) parts.push(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]);
-  if (q !== '0') parts.push(q);
-  if (y) parts.push(y);
-  const label = parts.length ? parts.join(' ') : 'ALL TIME';
+  document.getElementById('reasonTitle').textContent = compare
+    ? 'MOVE-OUT REASONS: ' + labelA + ' vs ' + labelB
+    : 'MOVE-OUT REASONS (' + labelA + ')';
+  const monthly = !!(fA.y || fA.m) || compare;
+  document.getElementById('trendTitle').textContent = compare
+    ? 'MONTHLY TREND: ' + labelA + ' vs ' + labelB
+    : ((fA.y || fA.m) ? 'MONTHLY TREND — ' + labelA : 'QUARTERLY TREND');
 
-  document.getElementById('reasonTitle').textContent = 'MOVE-OUT REASONS (' + label + ')';
-  document.getElementById('trendTitle').textContent = (y || m) ? 'MONTHLY TREND — ' + label : 'QUARTERLY TREND';
-
-  buildReasonChart(filtered);
-  buildTrendChart(filtered, !!(y || m));
+  buildReasonChart(dataA, dataB, labelA, labelB);
+  buildTrendChart(dataA, monthly, dataB, labelA, labelB);
 }
 
 // ── REVIEWS FILTER + DRILL-DOWN ──────────────────────────────
