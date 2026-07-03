@@ -163,14 +163,38 @@
       </div>
     </div>
 
+    <!-- CHART FILTERS -->
+    <div class="filters" style="margin-top:16px;border:1px solid var(--border);border-radius:8px;background:#fff">
+      <label>Year
+        <select id="fltYear"><option value="0">All</option></select>
+      </label>
+      <label>Quarter
+        <select id="fltQuarter">
+          <option value="0">All</option>
+          <option value="Q1">Q1</option><option value="Q2">Q2</option>
+          <option value="Q3">Q3</option><option value="Q4">Q4</option>
+        </select>
+      </label>
+      <label>Month
+        <select id="fltMonth">
+          <option value="0">All</option>
+          <option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option>
+          <option value="4">Apr</option><option value="5">May</option><option value="6">Jun</option>
+          <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
+          <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
+        </select>
+      </label>
+      <div class="review-stats"><b id="fltTotal">0</b> move-outs in selection</div>
+    </div>
+
     <!-- CHARTS -->
     <div class="chart-row">
       <div class="panel">
-        <h2>MOVE-OUT REASONS (ALL TIME)</h2>
+        <h2 id="reasonTitle">MOVE-OUT REASONS (ALL TIME)</h2>
         <div class="body"><div class="chart-box"><canvas id="reasonChart"></canvas></div></div>
       </div>
       <div class="panel">
-        <h2>QUARTERLY TREND</h2>
+        <h2 id="trendTitle">QUARTERLY TREND</h2>
         <div class="body"><div class="chart-box"><canvas id="trendChart"></canvas></div></div>
       </div>
     </div>
@@ -217,6 +241,8 @@ const CATEGORIES = ['Military / PCS','Buying a home','Relocation / job','Cost / 
   'Owner selling property','Lease expiration','Personal / family','Dissatisfied with management','Safety concerns','Other / unknown'];
 
 let allReviews = [];
+let allNTV = [];
+let reasonChartRef = null, trendChartRef = null;
 
 init();
 
@@ -270,8 +296,9 @@ function render(data) {
   document.getElementById('extCount').textContent = ext.toLocaleString();
   document.getElementById('extPct').textContent = '(' + (100 - cPct) + '%)';
 
-  buildReasonChart(ntv);
-  buildTrendChart(ntv);
+  allNTV = ntv;
+  setupChartFilters(ntv);
+  applyChartFilter();
 
   // Reviews
   allReviews = (data.reviews || []).map(r => ({...r, dateObj: new Date(r.date)}))
@@ -292,7 +319,8 @@ function buildReasonChart(ntv) {
   ntv.forEach(r => { counts[r.category] = (counts[r.category] || 0) + 1; });
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
 
-  new Chart(document.getElementById('reasonChart'), {
+  if (reasonChartRef) reasonChartRef.destroy();
+  reasonChartRef = new Chart(document.getElementById('reasonChart'), {
     type: 'bar',
     data: {
       labels: sorted.map(s => s[0]),
@@ -309,22 +337,35 @@ function buildReasonChart(ntv) {
   });
 }
 
-function buildTrendChart(ntv) {
+function buildTrendChart(ntv, monthly) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const qmap = {};
-  ntv.forEach(r => {
-    if (!r.year || !r.quarter) return;
-    const key = r.year + ' ' + r.quarter;
-    qmap[key] = (qmap[key] || 0) + 1;
-  });
-  const keys = Object.keys(qmap).sort((a, b) => {
-    const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
-    return ya - yb || qa.localeCompare(qb);
-  });
+  let keys;
+  if (monthly) {
+    ntv.forEach(r => {
+      const m = parseInt(r.month);
+      if (!m) return;
+      qmap[m] = (qmap[m] || 0) + 1;
+    });
+    keys = Object.keys(qmap).map(Number).sort((a, b) => a - b);
+  } else {
+    ntv.forEach(r => {
+      if (!r.year || !r.quarter) return;
+      const key = r.year + ' ' + r.quarter;
+      qmap[key] = (qmap[key] || 0) + 1;
+    });
+    keys = Object.keys(qmap).sort((a, b) => {
+      const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
+      return ya - yb || qa.localeCompare(qb);
+    });
+  }
+  const labels = monthly ? keys.map(k => MONTHS[k - 1]) : keys;
 
-  new Chart(document.getElementById('trendChart'), {
+  if (trendChartRef) trendChartRef.destroy();
+  trendChartRef = new Chart(document.getElementById('trendChart'), {
     type: 'line',
     data: {
-      labels: keys,
+      labels: labels,
       datasets: [{
         label: 'Move-outs', data: keys.map(k => qmap[k]),
         borderColor: NAVY, backgroundColor: NAVY, pointRadius: 3, tension: 0.3,
@@ -339,6 +380,47 @@ function buildTrendChart(ntv) {
       }
     }
   });
+}
+
+// ── CHART FILTERS (YEAR / QUARTER / MONTH) ───────────────────
+
+function setupChartFilters(ntv) {
+  const years = [...new Set(ntv.map(r => parseInt(r.year)).filter(Boolean))].sort((a, b) => b - a);
+  const yearSel = document.getElementById('fltYear');
+  years.forEach(y => {
+    const o = document.createElement('option');
+    o.value = y; o.textContent = y;
+    yearSel.appendChild(o);
+  });
+  ['fltYear', 'fltQuarter', 'fltMonth'].forEach(id =>
+    document.getElementById(id).addEventListener('change', applyChartFilter));
+}
+
+function applyChartFilter() {
+  const y = parseInt(document.getElementById('fltYear').value);
+  const q = document.getElementById('fltQuarter').value;
+  const m = parseInt(document.getElementById('fltMonth').value);
+
+  const filtered = allNTV.filter(r => {
+    if (y && parseInt(r.year) !== y) return false;
+    if (q !== '0' && r.quarter !== q) return false;
+    if (m && parseInt(r.month) !== m) return false;
+    return true;
+  });
+
+  document.getElementById('fltTotal').textContent = filtered.length.toLocaleString();
+
+  const parts = [];
+  if (m) parts.push(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m - 1]);
+  if (q !== '0') parts.push(q);
+  if (y) parts.push(y);
+  const label = parts.length ? parts.join(' ') : 'ALL TIME';
+
+  document.getElementById('reasonTitle').textContent = 'MOVE-OUT REASONS (' + label + ')';
+  document.getElementById('trendTitle').textContent = (y || m) ? 'MONTHLY TREND — ' + label : 'QUARTERLY TREND';
+
+  buildReasonChart(filtered);
+  buildTrendChart(filtered, !!(y || m));
 }
 
 // ── REVIEWS FILTER + DRILL-DOWN ──────────────────────────────
