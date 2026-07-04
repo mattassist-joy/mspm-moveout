@@ -184,6 +184,9 @@
           <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
         </select>
       </label>
+      <label>Form
+        <select id="fltForm"><option value="0">All</option></select>
+      </label>
       <label style="display:flex;align-items:center;gap:4px"><input type="checkbox" id="cmpOn"> Compare</label>
       <span id="cmpFilters" style="display:none">
         <label>vs Year
@@ -204,6 +207,9 @@
             <option value="7">Jul</option><option value="8">Aug</option><option value="9">Sep</option>
             <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
           </select>
+        </label>
+        <label>Form
+          <select id="cmpForm"><option value="0">All</option></select>
         </label>
       </span>
       <div class="review-stats"><b id="fltTotal">0</b> move-outs in selection</div>
@@ -449,7 +455,16 @@ function setupChartFilters(ntv) {
       sel.appendChild(o);
     });
   });
-  ['fltYear','fltQuarter','fltMonth','cmpYear','cmpQuarter','cmpMonth'].forEach(id =>
+  const forms = [...new Set(ntv.map(r => r.source).filter(Boolean))].sort();
+  ['fltForm', 'cmpForm'].forEach(id => {
+    const sel = document.getElementById(id);
+    forms.forEach(f => {
+      const o = document.createElement('option');
+      o.value = f; o.textContent = f;
+      sel.appendChild(o);
+    });
+  });
+  ['fltYear','fltQuarter','fltMonth','fltForm','cmpYear','cmpQuarter','cmpMonth','cmpForm'].forEach(id =>
     document.getElementById(id).addEventListener('change', applyChartFilter));
   document.getElementById('cmpOn').addEventListener('change', () => {
     document.getElementById('cmpFilters').style.display =
@@ -458,11 +473,12 @@ function setupChartFilters(ntv) {
   });
 }
 
-function readFilter_(yId, qId, mId) {
+function readFilter_(yId, qId, mId, fId) {
   return {
     y: parseInt(document.getElementById(yId).value),
     q: document.getElementById(qId).value,
     m: parseInt(document.getElementById(mId).value),
+    f: document.getElementById(fId).value,
   };
 }
 
@@ -471,6 +487,7 @@ function filterNTV_(f) {
     if (f.y && parseInt(r.year) !== f.y) return false;
     if (f.q !== '0' && r.quarter !== f.q) return false;
     if (f.m && parseInt(r.month) !== f.m) return false;
+    if (f.f !== '0' && r.source !== f.f) return false;
     return true;
   });
 }
@@ -480,18 +497,20 @@ function filterLabel_(f) {
   if (f.m) parts.push(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][f.m - 1]);
   if (f.q !== '0') parts.push(f.q);
   if (f.y) parts.push(f.y);
-  return parts.length ? parts.join(' ') : 'ALL TIME';
+  let label = parts.length ? parts.join(' ') : 'ALL TIME';
+  if (f.f !== '0') label = f.f + ' — ' + label;
+  return label;
 }
 
 function applyChartFilter() {
-  const fA = readFilter_('fltYear', 'fltQuarter', 'fltMonth');
+  const fA = readFilter_('fltYear', 'fltQuarter', 'fltMonth', 'fltForm');
   const dataA = filterNTV_(fA);
   const labelA = filterLabel_(fA);
   const compare = document.getElementById('cmpOn').checked;
 
   let dataB = null, labelB = '';
   if (compare) {
-    const fB = readFilter_('cmpYear', 'cmpQuarter', 'cmpMonth');
+    const fB = readFilter_('cmpYear', 'cmpQuarter', 'cmpMonth', 'cmpForm');
     dataB = filterNTV_(fB);
     labelB = filterLabel_(fB);
   }
