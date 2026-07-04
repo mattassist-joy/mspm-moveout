@@ -221,6 +221,20 @@
       </div>
     </div>
 
+    <!-- EXTRA FORMS -->
+    <div class="chart-row">
+      <div class="panel">
+        <h2>FINANCIAL FEEDBACK — <span id="finCount">0</span> SUBMISSIONS</h2>
+        <div class="body"><div class="chart-box" style="height:200px"><canvas id="finChart"></canvas></div></div>
+        <div class="review-list" id="finList" style="max-height:300px"></div>
+      </div>
+      <div class="panel">
+        <h2>SECURITY DEPOSIT REVIEWS — <span id="secCount">0</span> SUBMISSIONS</h2>
+        <div class="body"><div class="chart-box" style="height:200px"><canvas id="secChart"></canvas></div></div>
+        <div class="review-list" id="secList" style="max-height:300px"></div>
+      </div>
+    </div>
+
     <!-- REVIEWS -->
     <div class="panel reviews-panel">
       <h2>REVIEWS — FILTER &amp; DRILL DOWN</h2>
@@ -321,6 +335,9 @@ function render(data) {
   allNTV = ntv;
   setupChartFilters(ntv);
   applyChartFilter();
+
+  renderFormPanel(data.finFeedback, 'finCount', 'finChart', 'finList');
+  renderFormPanel(data.secDeposit, 'secCount', 'secChart', 'secList');
 
   // Reviews
   allReviews = (data.reviews || []).map(r => ({...r, dateObj: new Date(r.date)}))
@@ -493,6 +510,51 @@ function applyChartFilter() {
 
   buildReasonChart(dataA, dataB, labelA, labelB);
   buildTrendChart(dataA, monthly, dataB, labelA, labelB);
+}
+
+// ── EXTRA FORM PANELS ────────────────────────────────────────
+
+function renderFormPanel(form, countId, chartId, listId) {
+  if (!form || !form.rows || !form.rows.length) return;
+  const headers = form.headers;
+  const rows = form.rows.slice().sort((a, b) => new Date(b[1]) - new Date(a[1]));
+  document.getElementById(countId).textContent = rows.length;
+
+  // Quarterly trend (Year = 3rd-from-last col, Quarter = last col)
+  const yIdx = headers.length - 3, qIdx = headers.length - 1;
+  const qmap = {};
+  rows.forEach(r => {
+    if (!r[yIdx] || !r[qIdx]) return;
+    const key = r[yIdx] + ' ' + r[qIdx];
+    qmap[key] = (qmap[key] || 0) + 1;
+  });
+  const keys = Object.keys(qmap).sort((a, b) => {
+    const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
+    return ya - yb || qa.localeCompare(qb);
+  });
+  new Chart(document.getElementById(chartId), {
+    type: 'line',
+    data: { labels: keys, datasets: [{ data: keys.map(k => qmap[k]), borderColor: NAVY, backgroundColor: NAVY, pointRadius: 3, tension: 0.3 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { ticks: { font: { size: 9 }, maxRotation: 60 }, grid: { display: false } }, y: { beginAtZero: true, grid: { color: '#eef1f4' } } } }
+  });
+
+  // Expandable list (skip ID + Year/Month/Quarter cols)
+  const fieldIdx = headers.map((h, i) => i).filter(i => i >= 2 && i < headers.length - 3);
+  const list = document.getElementById(listId);
+  list.innerHTML = rows.map(r => {
+    const summary = fieldIdx.map(i => r[i]).filter(Boolean).slice(0, 2).join(' · ');
+    const detail = fieldIdx.filter(i => r[i]).map(i =>
+      `<div style="margin-top:4px"><b style="font-size:11px;color:var(--navy)">${esc(headers[i])}:</b> ${esc(r[i])}</div>`).join('');
+    const dateStr = r[1] ? new Date(r[1]).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '';
+    return `<div class="review-item">
+      <div class="review-head"><span class="who">${esc(dateStr)}</span></div>
+      <div class="review-snippet">${esc(summary) || '<i>Click to view</i>'}</div>
+      <div class="link" style="font-size:12px;color:#444">${detail}</div>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.review-item').forEach(el =>
+    el.addEventListener('click', () => el.classList.toggle('open')));
 }
 
 // ── REVIEWS FILTER + DRILL-DOWN ──────────────────────────────
