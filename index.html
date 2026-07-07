@@ -175,6 +175,12 @@
       </div>
     </div>
 
+    <!-- REVIEWS TREND -->
+    <div class="panel" style="margin-top:16px">
+      <h2 id="rvChartTitle">GOOGLE REVIEWS — QUARTERLY TREND</h2>
+      <div class="body"><div class="chart-box" style="height:260px"><canvas id="rvChart"></canvas></div></div>
+    </div>
+
     <!-- REVIEWS -->
     <div class="panel" style="margin-top:16px">
       <h2>GOOGLE REVIEWS — FILTER &amp; DRILL DOWN</h2>
@@ -662,12 +668,17 @@ function applyReviewFilter() {
   const cmp = document.getElementById('rvCmpOn').checked;
 
   const statsEl = document.getElementById('rvStats');
+  let listB = null, labelB = '';
   if (cmp) {
-    const listB = flt(read('rvCmp'));
+    const fB = read('rvCmp');
+    listB = flt(fB);
+    labelB = rvLabel_(fB);
     statsEl.innerHTML = '<b>' + stats(listA) + '</b> &nbsp;vs&nbsp; <b>' + stats(listB) + '</b>';
   } else {
     statsEl.innerHTML = '<b>' + stats(listA) + '</b>';
   }
+
+  buildReviewChart_(listA, listB, rvLabel_(fA), labelB, cmp || !!(fA.y || fA.m));
 
   const list = document.getElementById('reviewList');
   if (!listA.length) {
@@ -686,6 +697,73 @@ function applyReviewFilter() {
     </div>`).join('');
   list.querySelectorAll('.review-item').forEach(el =>
     el.addEventListener('click', () => el.classList.toggle('open')));
+}
+
+let rvChartRef = null;
+
+function rvLabel_(f) {
+  const p = [];
+  if (f.m) p.push(MONTHS[f.m - 1]);
+  if (f.q !== '0') p.push(f.q);
+  if (f.y) p.push(f.y);
+  let l = p.length ? p.join(' ') : 'All time';
+  if (f.s) l += ' (' + f.s + '★)';
+  return l;
+}
+
+function buildReviewChart_(listA, listB, labelA, labelB, monthly) {
+  const agg = rs => {
+    const sums = {}, cnts = {};
+    rs.forEach(r => {
+      const key = monthly ? r.m : r.y + ' ' + r.q;
+      sums[key] = (sums[key] || 0) + r.stars;
+      cnts[key] = (cnts[key] || 0) + 1;
+    });
+    const avg = {};
+    Object.keys(sums).forEach(k => avg[k] = Math.round(sums[k] / cnts[k] * 10) / 10);
+    return { avg, cnts };
+  };
+  const A = agg(listA);
+  const B = listB ? agg(listB) : null;
+
+  let keys;
+  if (monthly) {
+    keys = [...new Set([...Object.keys(A.avg), ...(B ? Object.keys(B.avg) : [])].map(Number))].sort((a, b) => a - b);
+  } else {
+    keys = Object.keys(A.avg).sort((a, b) => {
+      const [ya, qa] = a.split(' '); const [yb, qb] = b.split(' ');
+      return ya - yb || qa.localeCompare(qb);
+    });
+  }
+  const labels = monthly ? keys.map(k => MONTHS[k - 1]) : keys;
+
+  const datasets = [
+    { label: 'Avg ★ — ' + labelA, data: keys.map(k => A.avg[k] ?? null), borderColor: GOLD, backgroundColor: GOLD, pointRadius: 3, tension: 0.3, yAxisID: 'y' },
+    { label: 'Count — ' + labelA, data: keys.map(k => A.cnts[k] || 0), borderColor: NAVY, backgroundColor: NAVY, pointRadius: 2, tension: 0.3, yAxisID: 'y1', borderDash: [3, 3] },
+  ];
+  if (B) {
+    datasets.push({ label: 'Avg ★ — ' + labelB, data: keys.map(k => B.avg[k] ?? null), borderColor: ALERT, backgroundColor: ALERT, pointRadius: 3, tension: 0.3, yAxisID: 'y' });
+    datasets.push({ label: 'Count — ' + labelB, data: keys.map(k => B.cnts[k] || 0), borderColor: SUCCESS, backgroundColor: SUCCESS, pointRadius: 2, tension: 0.3, yAxisID: 'y1', borderDash: [3, 3] });
+  }
+
+  document.getElementById('rvChartTitle').textContent = B
+    ? 'GOOGLE REVIEWS: ' + labelA + ' vs ' + labelB
+    : 'GOOGLE REVIEWS — ' + (monthly ? 'MONTHLY' : 'QUARTERLY') + ' TREND (' + labelA + ')';
+
+  if (rvChartRef) rvChartRef.destroy();
+  rvChartRef = new Chart(document.getElementById('rvChart'), {
+    type: 'line',
+    data: { labels: labels, datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: true, position: 'bottom', labels: { font: { size: 9 } } } },
+      scales: {
+        x: { ticks: { font: { size: 9 }, maxRotation: 60, autoSkip: true, maxTicksLimit: 24 }, grid: { display: false } },
+        y: { min: 0, max: 5, title: { display: true, text: 'Avg rating', font: { size: 9 } }, grid: { color: '#eef1f4' } },
+        y1: { position: 'right', beginAtZero: true, title: { display: true, text: '# reviews', font: { size: 9 } }, grid: { display: false } }
+      }
+    }
+  });
 }
 
 function esc(s) {
